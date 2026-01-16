@@ -109,20 +109,16 @@
         .toast-error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; }
         .toast-success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.2); color: #22c55e; }
 
-        #app-container { opacity: 0; }
-
         .file-item {
-            transition: all 0.3s;
+            transition: all 0.3s ease;
             cursor: pointer;
         }
         .file-item:hover {
             background: rgba(45, 91, 255, 0.1);
             border-color: var(--accent-blue);
         }
-        .file-item.selected {
-            background: rgba(45, 91, 255, 0.2);
-            border-color: var(--accent-blue);
-        }
+
+        #app-container { opacity: 0; }
     </style>
 </head>
 <body>
@@ -136,16 +132,16 @@
     <div id="app-container" class="min-h-screen"></div>
 
     <script>
+        // Configuration
         const API_BASE = 'https://secure-file-transport.fullynerfed.workers.dev';
         
         let isAuthenticated = false;
         let userData = null;
         let authToken = null;
-        let availableFiles = [];
-        let selectedFile = null;
 
         const appContainer = document.getElementById('app-container');
 
+        // --- Templates ---
         const loginTemplate = `
             <div class="flex items-center justify-center min-h-screen">
                 <div class="relative z-10 w-full max-w-md px-6">
@@ -158,7 +154,7 @@
 
                     <div class="glass-card p-10">
                         <h2 class="text-2xl font-light text-center mb-8 tracking-tight">Intelligence Login</h2>
-                        <form id="login-form" class="space-y-6">
+                        <form id="login-form" onsubmit="handleLogin(event)" class="space-y-6">
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 px-1">Institutional ID</label>
                                 <input type="email" id="email" required placeholder="name@organization.com" class="input-field w-full px-5 py-4 rounded-xl text-sm">
@@ -185,13 +181,13 @@
                             <a href="#" class="nav-item active">Dashboard</a>
                             <a href="#" class="nav-item">Market Data</a>
                             <a href="#" class="nav-item">Vault</a>
-                            <a href="#" class="nav-item" id="logout-link">Logout</a>
+                            <a href="#" onclick="logout()" class="nav-item">Logout</a>
                         </div>
                     </div>
                     <div class="flex items-center gap-4">
                         <div class="text-right hidden sm:block">
                             <div class="text-[10px] text-blue-500 font-bold uppercase tracking-wider">Status: Secure</div>
-                            <div id="agent-id-display" class="text-xs text-slate-400 font-mono">ID: UNKNOWN</div>
+                            <div id="agent-id-display" class="text-xs text-slate-400 font-mono">ID: LOADING...</div>
                         </div>
                         <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 p-[1px]">
                             <div class="w-full h-full rounded-full bg-[#07090b] flex items-center justify-center">
@@ -216,27 +212,19 @@
                         <h2 class="text-sm font-bold uppercase tracking-widest flex items-center gap-2 mb-6">
                             <i class="fa-solid fa-shield-halved text-blue-500"></i> Secure Transport
                         </h2>
-                        
-                        <div id="file-selection" class="hidden">
-                            <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-3">Select File to Download</div>
-                            <div id="files-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto"></div>
-                            <button id="download-btn" class="w-full py-3 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-blue-500 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                                Download File
-                            </button>
-                        </div>
-
-                        <button id="init-btn" class="w-full py-4 bg-blue-600/10 border border-blue-500/30 text-blue-400 text-xs font-bold uppercase tracking-widest hover:bg-blue-600/20 transition-all rounded-lg">
+                        <button onclick="loadSecureFiles()" id="init-btn" class="w-full py-4 bg-blue-600/10 border border-blue-500/30 text-blue-400 text-xs font-bold uppercase tracking-widest hover:bg-blue-600/20 transition-all rounded-lg">
                             Initialize Secure Link
                         </button>
-                        
                         <div id="transfer-progress" class="hidden">
                             <div class="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
-                                <span>ESTABLISHING LINK...</span><span id="progress-text">0%</span>
+                                <span>DECRYPTING...</span><span id="progress-text">0%</span>
                             </div>
                             <div class="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                                 <div class="loader-bar" id="progress-bar"></div>
                             </div>
+                            <div class="font-mono text-[9px] text-green-500 mt-2 h-4" id="terminal-text"></div>
                         </div>
+                        <div id="files-ready" class="hidden space-y-3 pt-2"></div>
                     </div>
                 </div>
 
@@ -246,7 +234,7 @@
                             <h2 class="text-xl font-light">Market <span class="font-serif italic text-blue-500">Scanner</span></h2>
                             <div class="flex gap-2">
                                 <input type="text" id="stock-symbol" placeholder="AAPL" class="glass-input px-4 py-2 rounded-lg text-sm w-32 uppercase">
-                                <button id="update-chart-btn" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold uppercase">Scan</button>
+                                <button onclick="updateChart()" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold uppercase">Scan</button>
                             </div>
                         </div>
                         <div id="tv-chart-container" class="h-[500px] bg-black rounded-lg border border-white/5"></div>
@@ -255,7 +243,8 @@
             </main>
         `;
 
-        function handleLogin(e) {
+        // --- Authentication ---
+        async function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
@@ -264,14 +253,16 @@
             btn.disabled = true;
             btn.innerText = 'AUTHENTICATING...';
 
-            fetch(`${API_BASE}/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
                     showToast('success-toast');
                     isAuthenticated = true;
                     userData = data;
@@ -284,30 +275,11 @@
                     btn.disabled = false;
                     btn.innerText = 'AUTHENTICATE';
                 }
-            })
-            .catch(err => {
+            } catch (err) {
                 showToast('error-toast', "Connection Failed");
                 btn.disabled = false;
                 btn.innerText = 'AUTHENTICATE';
-            });
-        }
-
-        function renderDashboard() {
-            appContainer.innerHTML = dashboardTemplate;
-            gsap.to('#app-container', { opacity: 1, duration: 0.5 });
-            
-            // Attach event listeners
-            document.getElementById('logout-link').addEventListener('click', (e) => {
-                e.preventDefault();
-                logout();
-            });
-            document.getElementById('init-btn').addEventListener('click', initiateSecureTransfer);
-            document.getElementById('download-btn').addEventListener('click', downloadSelectedFile);
-            document.getElementById('update-chart-btn').addEventListener('click', updateChart);
-            
-            setGreeting();
-            loadTradingViewWidget('NASDAQ:NVDA');
-            if (userData?.id) document.getElementById('agent-id-display').innerText = `ID: ${userData.id}`;
+            }
         }
 
         function logout() {
@@ -316,15 +288,16 @@
             authToken = null;
             gsap.to('#app-container', { opacity: 0, duration: 0.5, onComplete: () => {
                 appContainer.innerHTML = loginTemplate;
-                document.getElementById('login-form').addEventListener('submit', handleLogin);
                 gsap.to('#app-container', { opacity: 1, duration: 0.5 });
             }});
         }
 
-        function initiateSecureTransfer() {
+        // --- Secure File Transport ---
+        async function loadSecureFiles() {
             const btn = document.getElementById('init-btn');
             const progressArea = document.getElementById('transfer-progress');
             const progressBar = document.getElementById('progress-bar');
+            const filesArea = document.getElementById('files-ready');
 
             btn.classList.add('hidden');
             progressArea.classList.remove('hidden');
@@ -334,127 +307,94 @@
                 p += 3;
                 progressBar.style.width = `${p}%`;
                 document.getElementById('progress-text').innerText = `${p}%`;
+                
                 if (p >= 100) {
                     clearInterval(interval);
-                    loadAvailableFiles();
+                    fetchFileList();
                 }
-            }, 20);
+            }, 25);
         }
 
-        function loadAvailableFiles() {
+        async function fetchFileList() {
             const progressArea = document.getElementById('transfer-progress');
-            const fileSelection = document.getElementById('file-selection');
-            
-            fetch(`${API_BASE}/files`, {
-                headers: { 'Authorization': `Bearer ${authToken}` }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.files) {
-                    availableFiles = data.files;
+            const filesArea = document.getElementById('files-ready');
+
+            try {
+                const response = await fetch(`${API_BASE}/files`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
                     progressArea.classList.add('hidden');
-                    fileSelection.classList.remove('hidden');
-                    renderFilesList();
-                    showToast('success-toast', 'Secure link established');
+                    filesArea.classList.remove('hidden');
+                    
+                    filesArea.innerHTML = data.files.map(file => `
+                        <div class="file-item flex items-center justify-between p-3 border border-white/10 rounded-lg bg-white/5" onclick="downloadFile('${file.name}')">
+                            <div>
+                                <div class="text-xs font-bold">${file.name}</div>
+                                <div class="text-[10px] text-slate-500 mt-1">${file.size}</div>
+                            </div>
+                            <i class="fa-solid fa-download text-blue-500"></i>
+                        </div>
+                    `).join('');
                 } else {
                     showToast('error-toast', 'Failed to load files');
+                    progressArea.classList.add('hidden');
                 }
-            })
-            .catch(err => {
+            } catch (err) {
                 showToast('error-toast', 'Connection error');
                 progressArea.classList.add('hidden');
-                document.getElementById('init-btn').classList.remove('hidden');
-            });
+            }
         }
 
-        function renderFilesList() {
-            const filesList = document.getElementById('files-list');
-            filesList.innerHTML = availableFiles.map((file, idx) => `
-                <div class="file-item p-3 border border-white/10 rounded-lg bg-white/5" data-index="${idx}">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <div class="text-xs font-bold">${file.name}</div>
-                            <div class="text-[10px] text-slate-500">${formatBytes(file.size)}</div>
-                        </div>
-                        <i class="fa-solid fa-circle-check text-transparent" id="check-${idx}"></i>
-                    </div>
-                </div>
-            `).join('');
+        async function downloadFile(filename) {
+            showToast('success-toast', `Downloading ${filename}...`);
 
-            // Attach click listeners to file items
-            document.querySelectorAll('.file-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    selectFile(parseInt(this.dataset.index));
+            try {
+                const response = await fetch(`${API_BASE}/download`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({ filename })
                 });
-            });
-        }
 
-        function selectFile(idx) {
-            selectedFile = availableFiles[idx];
-            document.querySelectorAll('.file-item').forEach((el, i) => {
-                if (i === idx) {
-                    el.classList.add('selected');
-                    document.getElementById(`check-${i}`).classList.remove('text-transparent');
-                    document.getElementById(`check-${i}`).classList.add('text-green-500');
-                } else {
-                    el.classList.remove('selected');
-                    document.getElementById(`check-${i}`).classList.add('text-transparent');
-                    document.getElementById(`check-${i}`).classList.remove('text-green-500');
-                }
-            });
-            document.getElementById('download-btn').disabled = false;
-        }
-
-        function downloadSelectedFile() {
-            if (!selectedFile) return;
-            
-            const btn = document.getElementById('download-btn');
-            btn.disabled = true;
-            btn.innerText = 'DOWNLOADING...';
-            
-            fetch(`${API_BASE}/download`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
-                },
-                body: JSON.stringify({ filename: selectedFile.name })
-            })
-            .then(response => {
                 if (response.ok) {
-                    return response.blob();
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    showToast('success-toast', 'Download complete');
+                } else {
+                    showToast('error-toast', 'Download failed');
                 }
-                throw new Error('Download failed');
-            })
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = selectedFile.name;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                
-                showToast('success-toast', 'Download complete');
-                btn.innerText = 'DOWNLOAD FILE';
-                btn.disabled = false;
-            })
-            .catch(err => {
-                showToast('error-toast', 'Download failed');
-                btn.innerText = 'DOWNLOAD FILE';
-                btn.disabled = false;
-            });
+            } catch (err) {
+                showToast('error-toast', 'Download error');
+            }
         }
 
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        // --- Dashboard ---
+        function renderDashboard() {
+            appContainer.innerHTML = dashboardTemplate;
+            gsap.to('#app-container', { opacity: 1, duration: 0.5 });
+            
+            setGreeting();
+            loadTradingViewWidget('NASDAQ:NVDA');
+            if (userData?.id) document.getElementById('agent-id-display').innerText = `ID: ${userData.id}`;
         }
 
+        // --- Utils ---
         function showToast(id, msg) {
             const t = document.getElementById(id);
             if (msg) t.innerText = msg;
@@ -496,9 +436,9 @@
             loadTradingViewWidget(sym.includes(':') ? sym : `NASDAQ:${sym}`);
         }
 
+        // --- Init ---
         window.onload = () => {
             appContainer.innerHTML = loginTemplate;
-            document.getElementById('login-form').addEventListener('submit', handleLogin);
             gsap.to('#app-container', { opacity: 1, duration: 1 });
         };
     </script>
