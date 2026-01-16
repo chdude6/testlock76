@@ -158,7 +158,7 @@
 
                     <div class="glass-card p-10">
                         <h2 class="text-2xl font-light text-center mb-8 tracking-tight">Intelligence Login</h2>
-                        <form id="login-form" onsubmit="handleLogin(event)" class="space-y-6">
+                        <form id="login-form" class="space-y-6">
                             <div>
                                 <label class="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 px-1">Institutional ID</label>
                                 <input type="email" id="email" required placeholder="name@organization.com" class="input-field w-full px-5 py-4 rounded-xl text-sm">
@@ -185,7 +185,7 @@
                             <a href="#" class="nav-item active">Dashboard</a>
                             <a href="#" class="nav-item">Market Data</a>
                             <a href="#" class="nav-item">Vault</a>
-                            <a href="#" onclick="logout()" class="nav-item">Logout</a>
+                            <a href="#" class="nav-item" id="logout-link">Logout</a>
                         </div>
                     </div>
                     <div class="flex items-center gap-4">
@@ -220,12 +220,12 @@
                         <div id="file-selection" class="hidden">
                             <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-3">Select File to Download</div>
                             <div id="files-list" class="space-y-2 mb-4 max-h-60 overflow-y-auto"></div>
-                            <button onclick="downloadSelectedFile()" id="download-btn" class="w-full py-3 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-blue-500 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <button id="download-btn" class="w-full py-3 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest hover:bg-blue-500 transition-all rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                                 Download File
                             </button>
                         </div>
 
-                        <button onclick="initiateSecureTransfer()" id="init-btn" class="w-full py-4 bg-blue-600/10 border border-blue-500/30 text-blue-400 text-xs font-bold uppercase tracking-widest hover:bg-blue-600/20 transition-all rounded-lg">
+                        <button id="init-btn" class="w-full py-4 bg-blue-600/10 border border-blue-500/30 text-blue-400 text-xs font-bold uppercase tracking-widest hover:bg-blue-600/20 transition-all rounded-lg">
                             Initialize Secure Link
                         </button>
                         
@@ -246,7 +246,7 @@
                             <h2 class="text-xl font-light">Market <span class="font-serif italic text-blue-500">Scanner</span></h2>
                             <div class="flex gap-2">
                                 <input type="text" id="stock-symbol" placeholder="AAPL" class="glass-input px-4 py-2 rounded-lg text-sm w-32 uppercase">
-                                <button onclick="updateChart()" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold uppercase">Scan</button>
+                                <button id="update-chart-btn" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold uppercase">Scan</button>
                             </div>
                         </div>
                         <div id="tv-chart-container" class="h-[500px] bg-black rounded-lg border border-white/5"></div>
@@ -255,7 +255,7 @@
             </main>
         `;
 
-        async function handleLogin(e) {
+        function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
@@ -264,16 +264,14 @@
             btn.disabled = true;
             btn.innerText = 'AUTHENTICATING...';
 
-            try {
-                const response = await fetch(`${API_BASE}/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.success) {
+            fetch(`${API_BASE}/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
                     showToast('success-toast');
                     isAuthenticated = true;
                     userData = data;
@@ -286,16 +284,26 @@
                     btn.disabled = false;
                     btn.innerText = 'AUTHENTICATE';
                 }
-            } catch (err) {
-                showToast('error-toast', "Connection Failed: " + err.message);
+            })
+            .catch(err => {
+                showToast('error-toast', "Connection Failed");
                 btn.disabled = false;
                 btn.innerText = 'AUTHENTICATE';
-            }
+            });
         }
 
         function renderDashboard() {
             appContainer.innerHTML = dashboardTemplate;
             gsap.to('#app-container', { opacity: 1, duration: 0.5 });
+            
+            // Attach event listeners
+            document.getElementById('logout-link').addEventListener('click', (e) => {
+                e.preventDefault();
+                logout();
+            });
+            document.getElementById('init-btn').addEventListener('click', initiateSecureTransfer);
+            document.getElementById('download-btn').addEventListener('click', downloadSelectedFile);
+            document.getElementById('update-chart-btn').addEventListener('click', updateChart);
             
             setGreeting();
             loadTradingViewWidget('NASDAQ:NVDA');
@@ -308,15 +316,15 @@
             authToken = null;
             gsap.to('#app-container', { opacity: 0, duration: 0.5, onComplete: () => {
                 appContainer.innerHTML = loginTemplate;
+                document.getElementById('login-form').addEventListener('submit', handleLogin);
                 gsap.to('#app-container', { opacity: 1, duration: 0.5 });
             }});
         }
 
-        async function initiateSecureTransfer() {
+        function initiateSecureTransfer() {
             const btn = document.getElementById('init-btn');
             const progressArea = document.getElementById('transfer-progress');
             const progressBar = document.getElementById('progress-bar');
-            const fileSelection = document.getElementById('file-selection');
 
             btn.classList.add('hidden');
             progressArea.classList.remove('hidden');
@@ -333,18 +341,16 @@
             }, 20);
         }
 
-        async function loadAvailableFiles() {
+        function loadAvailableFiles() {
             const progressArea = document.getElementById('transfer-progress');
             const fileSelection = document.getElementById('file-selection');
             
-            try {
-                const response = await fetch(`${API_BASE}/files`, {
-                    headers: { 'Authorization': `Bearer ${authToken}` }
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok && data.files) {
+            fetch(`${API_BASE}/files`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.files) {
                     availableFiles = data.files;
                     progressArea.classList.add('hidden');
                     fileSelection.classList.remove('hidden');
@@ -353,15 +359,18 @@
                 } else {
                     showToast('error-toast', 'Failed to load files');
                 }
-            } catch (err) {
-                showToast('error-toast', 'Connection error: ' + err.message);
-            }
+            })
+            .catch(err => {
+                showToast('error-toast', 'Connection error');
+                progressArea.classList.add('hidden');
+                document.getElementById('init-btn').classList.remove('hidden');
+            });
         }
 
         function renderFilesList() {
             const filesList = document.getElementById('files-list');
             filesList.innerHTML = availableFiles.map((file, idx) => `
-                <div class="file-item p-3 border border-white/10 rounded-lg bg-white/5" onclick="selectFile(${idx})">
+                <div class="file-item p-3 border border-white/10 rounded-lg bg-white/5" data-index="${idx}">
                     <div class="flex items-center justify-between">
                         <div>
                             <div class="text-xs font-bold">${file.name}</div>
@@ -371,6 +380,13 @@
                     </div>
                 </div>
             `).join('');
+
+            // Attach click listeners to file items
+            document.querySelectorAll('.file-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    selectFile(parseInt(this.dataset.index));
+                });
+            });
         }
 
         function selectFile(idx) {
@@ -389,48 +405,46 @@
             document.getElementById('download-btn').disabled = false;
         }
 
-        async function downloadSelectedFile() {
+        function downloadSelectedFile() {
             if (!selectedFile) return;
             
             const btn = document.getElementById('download-btn');
             btn.disabled = true;
             btn.innerText = 'DOWNLOADING...';
             
-            try {
-                const response = await fetch(`${API_BASE}/download`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({ filename: selectedFile.name })
-                });
-                
+            fetch(`${API_BASE}/download`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ filename: selectedFile.name })
+            })
+            .then(response => {
                 if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = selectedFile.name;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                    
-                    showToast('success-toast', 'Download complete');
-                    btn.innerText = 'DOWNLOAD FILE';
-                    btn.disabled = false;
-                } else {
-                    const error = await response.json();
-                    showToast('error-toast', error.error || 'Download failed');
-                    btn.innerText = 'DOWNLOAD FILE';
-                    btn.disabled = false;
+                    return response.blob();
                 }
-            } catch (err) {
-                showToast('error-toast', 'Download error: ' + err.message);
+                throw new Error('Download failed');
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = selectedFile.name;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showToast('success-toast', 'Download complete');
                 btn.innerText = 'DOWNLOAD FILE';
                 btn.disabled = false;
-            }
+            })
+            .catch(err => {
+                showToast('error-toast', 'Download failed');
+                btn.innerText = 'DOWNLOAD FILE';
+                btn.disabled = false;
+            });
         }
 
         function formatBytes(bytes) {
@@ -484,6 +498,7 @@
 
         window.onload = () => {
             appContainer.innerHTML = loginTemplate;
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
             gsap.to('#app-container', { opacity: 1, duration: 1 });
         };
     </script>
